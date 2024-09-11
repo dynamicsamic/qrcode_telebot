@@ -1,0 +1,23 @@
+[project]
+name = "qrcode2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python-headless>=4.10.0.84",
+    "aiogram>=3.13.0",
+    "pydantic-settings>=2.5.1",
+    "sqlalchemy>=2.0.34",
+    "asyncpg>=0.29.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+]
