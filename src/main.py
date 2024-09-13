@@ -4,22 +4,21 @@ import sys
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
-from cv2 import QRCodeDetector
 
 from db import Base, engine
 from handlers import router
 from settings import settings
 
 dp = Dispatcher(storage=MemoryStorage())
+dp.include_router(router)
+bot = Bot(settings.BOT_TOKEN)
+
 
 async def main():
     async with engine.begin() as con:
         await con.run_sync(Base.metadata.create_all)
 
-    qreader = QRCodeDetector()
-    bot = Bot(settings.BOT_TOKEN)
-    dp.include_router(router)
-    await dp.start_polling(bot, qreader=qreader)
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
