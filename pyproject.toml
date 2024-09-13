@@ -1,23 +1,24 @@
 [project]
-name = "qrcode2"
+name = "qrcode"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "opencv-python-headless>=4.10.0.84",
-    "aiogram>=3.13.0",
-    "pydantic-settings>=2.5.1",
+    "qreader>=3.14",
+    "zxing-cpp>=2.2.0",
     "sqlalchemy>=2.0.34",
     "asyncpg>=0.29.0",
+    "aiogram>=3.13.0",
+    "pydantic-settings>=2.5.2",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.3.3",
     "pytest-asyncio>=0.24.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = "."
+asyncio_default_fixture_loop_scope = "module"
