@@ -1,5 +1,5 @@
 from sqlalchemy import delete, insert, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from settings import settings
@@ -23,30 +23,31 @@ engine = create_async_engine(
     "postgresql+asyncpg://test_user:test_user@localhost:5432/test_qrcode",
     echo=settings.DEBUG,
 )
+sessionmaker = async_sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
 
 class Repo:
-    def __init__(self) -> None:
-        self.sessionmaker = async_sessionmaker(
-            bind=engine, expire_on_commit=False, autoflush=False
-        )
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
 
     async def add(self, value: str) -> int:
-        async with self.sessionmaker() as session, session.begin():
-            entry_id = await session.execute(
+        async with self.session.begin():
+            entry_id = await self.session.execute(
                 insert(Entry).values(value=value).returning(Entry.id)
             )
-            await session.commit()
+            await self.session.commit()
         return entry_id
 
     async def delete(self, entry_id: int) -> int:
-        async with self.sessionmaker() as session, session.begin():
-            deleted = await session.execute(delete(Entry).where(Entry.id == entry_id))
-            await session.commit()
+        async with self.session.begin():
+            deleted = await self.session.execute(
+                delete(Entry).where(Entry.id == entry_id)
+            )
+            await self.session.commit()
         return deleted.rowcount
 
     async def get_entry_id(self, value: str) -> int:
-        async with self.sessionmaker() as session, session.begin():
+        async with self.session.begin():
             return (
-                await session.scalars(select(Entry.id).where(Entry.value == value))
+                await self.session.scalars(select(Entry.id).where(Entry.value == value))
             ).first()
