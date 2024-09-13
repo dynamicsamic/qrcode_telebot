@@ -1,141 +1,72 @@
 import datetime
-from collections import deque
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Deque, Dict, Optional, Type
+import io
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from aiogram import Bot, F
-from aiogram.client.session.base import BaseSession
-from aiogram.methods import SendMessage, TelegramMethod
-from aiogram.methods.base import Response, TelegramType
+from aiogram.enums import ParseMode
 from aiogram.types import (
-    UNSET_PARSE_MODE,
-    Chat,
-    Message,
-    ResponseParameters,
-    Update,
-    User,
+    PhotoSize,
 )
 
+from src.handlers import Repo, kb
 from src.main import dp
 
+from .conftest import Client, MockedBot
 
-class MockedSession(BaseSession):
-    def __init__(self):
-        super(MockedSession, self).__init__()
-        self.responses: Deque[Response[TelegramType]] = deque()
-        self.requests: Deque[TelegramMethod[TelegramType]] = deque()
-        self.closed = True
-
-    def add_result(self, response: Response[TelegramType]) -> Response[TelegramType]:
-        self.responses.append(response)
-        return response
-
-    def get_request(self) -> TelegramMethod[TelegramType]:
-        return self.requests.pop()
-
-    async def close(self):
-        self.closed = True
-
-    async def make_request(
-        self,
-        bot: Bot,
-        method: TelegramMethod[TelegramType],
-        timeout: Optional[int] = UNSET_PARSE_MODE,
-    ) -> TelegramType:
-        self.closed = False
-        self.requests.append(method)
-        response: Response[TelegramType] = self.responses.pop()
-        self.check_response(
-            bot=bot,
-            method=method,
-            status_code=response.error_code,
-            content=response.model_dump_json(),
-        )
-        return response.result  # type: ignore
-
-    async def stream_content(
-        self,
-        url: str,
-        headers: Optional[Dict[str, Any]] = None,
-        timeout: int = 30,
-        chunk_size: int = 65536,
-        raise_for_status: bool = True,
-    ) -> AsyncGenerator[bytes, None]:  # pragma: no cover
-        yield b""
+with open("tests/images/example.jpg", "rb") as f:
+    mock_file = io.BytesIO(f.read())
 
 
-class MockedBot(Bot):
-    if TYPE_CHECKING:
-        session: MockedSession
-
-    def __init__(self, **kwargs):
-        super(MockedBot, self).__init__(
-            kwargs.pop("token", "42:TEST"), session=MockedSession(), **kwargs
-        )
-        self._me = User(
-            id=self.id,
-            is_bot=True,
-            first_name="FirstName",
-            last_name="LastName",
-            username="tbot",
-            language_code="ru",
-        )
-
-    def add_result_for(
-        self,
-        method: Type[TelegramMethod[TelegramType]],
-        ok: bool,
-        result: TelegramType = None,
-        description: Optional[str] = None,
-        error_code: int = 200,
-        migrate_to_chat_id: Optional[int] = None,
-        retry_after: Optional[int] = None,
-    ) -> Response[TelegramType]:
-        response = Response[method.__returning__](  # type: ignore
-            ok=ok,
-            result=result,
-            description=description,
-            error_code=error_code,
-            parameters=ResponseParameters(
-                migrate_to_chat_id=migrate_to_chat_id,
-                retry_after=retry_after,
-            ),
-        )
-        self.session.add_result(response)
-        return response
-
-    def get_request(self) -> TelegramMethod[TelegramType]:
-        return self.session.get_request()
-
-
-bot = MockedBot()
-
-
-@dp.message(F.text == "hello")
-async def hello(message: Message):
-    await message.answer(message.text or "hello")
-
-
-@dp.message(F.text == "bar")
-async def bar(message: Message):
-    await message.answer(message.text or "bar")
-    # return "bar"
+client = Client(dp)
 
 
 @pytest.mark.asyncio
-async def test_foo():
-    bot.add_result_for(SendMessage, ok=True, description="Kaboom")
-    await dp.feed_update(
-        bot=bot,
-        update=Update(
-            update_id=42,
-            message=Message(
-                message_id=42,
-                date=datetime.datetime.now(),
-                text="",
-                chat=Chat(id=42, type="private"),
-                from_user=User(id=42, is_bot=False, first_name="Test"),
-            ),
-        ),
+@patch.object(Repo, "get_entry_id")
+async def test_recieve_with_no_qrcode_message_sends_answer(mockrepo: AsyncMock):
+    answer = await client.send_message(
+        request_kwargs={
+            "message_id": 11,
+            "text": "hello",
+            "date": datetime.datetime.now(),
+        }
     )
-    print(bot.session.requests)
+    mockrepo.assert_not_awaited()
+    assert answer.text == "Отправьте *__фото__* QR кода для сканирования"
+    assert answer.parse_mode == ParseMode.MARKDOWN_V2
+
+
+@pytest.mark.asyncio
+@patch.object(Repo, "get_entry_id", return_value=11)
+@patch.object(MockedBot, "download", return_value=mock_file)
+async def test_recieve_with_existing_qrcode_sends_two_answers(
+    mockbot: AsyncMock, mockrepo: AsyncMock
+):
+    responses = await client.send_message(
+        expected_replies_from_bot=2,
+        request_kwargs={
+            "message_id": 11,
+            "text": "",
+            "date": datetime.datetime.now(),
+            "photo": [
+                PhotoSize(
+                    file_id="123123",
+                    file_unique_id="123123",
+                    width=12,
+                    height=13,
+                )
+            ],
+        },
+    )
+    mockbot.assert_awaited_once()
+    mockrepo.assert_awaited_once()
+
+    assert len(responses) == 2
+    resp1, resp2 = responses
+    assert resp1.text == "Идет обработка QR кода..."
+    assert resp1.reply_markup is None
+
+    assert (
+        resp2.text
+        == "Полученный QR код уже существует в базе данных. Желаете его удалить?"
+    )
+    assert resp2.reply_markup == kb.as_markup()
